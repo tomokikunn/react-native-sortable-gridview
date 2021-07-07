@@ -3,6 +3,7 @@ import React, { Component } from 'react';
 import {
   StyleSheet,
   View,
+  ScrollView,
   Platform,
   Animated,
   PanResponder,
@@ -30,8 +31,10 @@ const selectStyle = {
   elevation: 5,
 }
 
-export default class SortableGridview extends Component {
+export default class SortableGridView extends Component {
   state = {
+    useScrollView: this.props.useScrollView || false,
+    scrollable: this.props.useScrollView || false,
     containerOnMount: false,
     contentStyle: {},
     selectIndex: null,
@@ -59,10 +62,13 @@ export default class SortableGridview extends Component {
         toValue: 1,
         duration: 300,
         easing: Easing.ease,
+        useNativeDriver : false
+
       },
       endTimingOption: {
         toValue: 0,
         duration: 150,
+        useNativeDriver : false
         // useNativeDriver: true,
       },
       ...this.props.customAnimation,
@@ -71,16 +77,16 @@ export default class SortableGridview extends Component {
         toValue: 1,
         duration: 300,
         easing: Easing.ease,
-        // useNativeDriver: true,
+        useNativeDriver: false,
       },
       endTimingOption: {
         toValue: 0,
         duration: 150,
-        // useNativeDriver: true,
+        useNativeDriver: false,
       },
     }
   }
-  componentWillMount() {
+  UNSAFE_componentWillMount() {
     this.data = [...this.state.data];
     this.currentAnchor;
     this.currentAnchorAnimation;
@@ -104,7 +110,7 @@ export default class SortableGridview extends Component {
     });
   }
 
-  componentWillReceiveProps(nextProps) {
+  UNSAFE_componentWillReceiveProps(nextProps) {
     if (
       !isEqual(this.props.data, nextProps.data) ||
       nextProps.numPerRow !== this.props.numPerRow ||
@@ -129,7 +135,7 @@ export default class SortableGridview extends Component {
       }
 
       this.data = data;
-      
+
       this.setState({
         ...this.state,
         data,
@@ -147,14 +153,14 @@ export default class SortableGridview extends Component {
         this._setContentStyle(this.state.layoutWidth);
       });
     }
-    
+
   }
 
   setTimer = (dx, dy) => {
     this.timer = setTimeout(() => {
       this._caluIndex(dx, dy);
     }, this.state.sensitivity);
-      
+
   }
 
   clearTimer = () => {
@@ -169,23 +175,28 @@ export default class SortableGridview extends Component {
     // if (!this.currentAnchor) {
     //   return;
     // }
+    // this.state.useScrollView && this.setState({
+    //   scrollable: false,
+    // });
     this.tempX = this.positions[this.positionIndex].x
     this.tempY = this.positions[this.positionIndex].y
   };
 
   onMoveBlock = (evt, gestureState) => {
-    this.clearTimer();
-    const { dx, dy } = gestureState;
+    // this.clearTimer();
+    const { dx, dy, vx, vy } = gestureState;
     this[this.currentAnchor].setValue({ x: dx + this.tempX, y: dy + this.tempY})
-    
-    this.setTimer(dx + this.tempX, dy + this.tempY);
+    if (Math.abs(vx) < 0.2 && Math.abs(vy) < 0.2) {
+      return;
+    }
+
+    this._caluIndex(dx + this.tempX, dy + this.tempY);
+    // this.setTimer(dx + this.tempX, dy + this.tempY);
   }
 
   onReleaseBlock = (evt, gestureState) => {
-    this.clearTimer();
+    // this.clearTimer();
     // const { dx, dy, moveX, moveY, vx, vy , x0, y0 } = gestureState;
-
-    
 
     Animated.parallel([
       Animated.timing(
@@ -196,6 +207,8 @@ export default class SortableGridview extends Component {
             y: this.positions[this.positionIndex].y,
           },
           duration: 150,
+          useNativeDriver : false
+
         },
       ),
       Animated.timing(
@@ -206,6 +219,7 @@ export default class SortableGridview extends Component {
       this.setState({
         data: this.data,
         selectIndex: null,
+        scrollable: this.state.useScrollView || false,
       }, () => {
         this.props.onDragRelease && this.props.onDragRelease(this.data);
         this.positionIndex = null;
@@ -213,14 +227,17 @@ export default class SortableGridview extends Component {
         this.caluing = false;
         this.panCapture = false;
       });
-      
     });
+
+    this.tempX = null;
+    this.tempY = null;
   };
 
   _caluIndex = (x, y) => {
     if (this.caluing) {
       return;
     }
+    this.caluing = true;
     this.data = this.data || [...this.state.data];
     let centerX = (x + this.state.perWidth / 2);
     let centerY = (y + this.state.perHeight / 2);
@@ -243,25 +260,35 @@ export default class SortableGridview extends Component {
       return;
     }
     let newIndex;
+    let rangeMax;
+    let rangeMin;
     if (index === this.positionIndex) {
       newIndex = index;
-    } else  if (index > this.positionIndex) {
+      rangeMax = index;
+      rangeMin = index;
+    } else if (index > this.positionIndex) {
       const moveItem = this.data.splice(this.positionIndex, 1);
       const animate = this.animateArray.splice(this.positionIndex, 1)[0];
       this.data.splice(index, 0, moveItem[0]);
       this.animateArray.splice(index, 0, animate);
       newIndex = index;
-      
+      rangeMax = index;
+      rangeMin = this.positionIndex;
     } else if (index < this.positionIndex) {
       const moveItem = this.data.splice(this.positionIndex, 1);
       const animate = this.animateArray.splice(this.positionIndex, 1)[0];
       this.data.splice(index, 0, moveItem[0]);
       this.animateArray.splice(index, 0, animate);
       newIndex = index ;
+      rangeMax = this.positionIndex;
+      rangeMin = index;
     }
     const parallel = [];
     this.animateArray.map((item, index) => {
-      if (newIndex === index) {
+      if (index > rangeMax || index < rangeMin) {
+        return;
+      }
+      if (newIndex === index || !this.positions[index]) {
         return;
       }
       parallel.push(
@@ -273,17 +300,18 @@ export default class SortableGridview extends Component {
               y: this.positions[index].y,
             },
             duration: 150,
+            useNativeDriver : false
           },
         )
       )
-      
+
     })
     this.positionIndex = index;
 
     Animated.parallel(parallel).start(() => {
       this.caluing = false;
     });
-    
+
   }
 
   _setContentStyle = (width) => {
@@ -316,7 +344,10 @@ export default class SortableGridview extends Component {
         width: '100%',
         flexDirection: 'row',
         flexWrap: 'wrap',
-        overflow: 'hidden',
+        zIndex: 2,
+        elevation: 2,
+        position: 'relative'
+        // overflow: 'hidden',
       },
     });
   }
@@ -325,7 +356,7 @@ export default class SortableGridview extends Component {
     if (this.state.selectAnimation === 'none') {
       return {};
     }
-    
+
     if (!this[`selectAnimation${key}`]) {
       this[`selectAnimation${key}`] = new Animated.Value(0);
     }
@@ -364,6 +395,7 @@ export default class SortableGridview extends Component {
     return () => {
       this.setState({
         selectIndex: index,
+        scrollable: false,
       })
       this.positionIndex = index;
       this.currentAnchor = `moveAnimate${key}`;
@@ -375,7 +407,6 @@ export default class SortableGridview extends Component {
         this.state.customAnimation.startTimingOption,
       ).start();
     }
-    
   }
 
   _containerOnLayout = ({nativeEvent}) => {
@@ -384,10 +415,11 @@ export default class SortableGridview extends Component {
 
   render() {
     const { paddingTop, paddingBottom, paddingLeft, paddingRight } = this.state;
-    const { contentStyle = {}, style = {}, itemCoverStyle = {}, lockItemCoverStyle = {} } = this.props;
+    const { contentStyle = {}, style = {}, itemCoverStyle = {}, lockItemCoverStyle = {}, headerComponent = () => {return null;}, footerComponent = () => {return null;} } = this.props;
     const allData = [...this.state.data, ...this.state.lockData];
     return (
-      <View style={[styles.fullWidth, style]} onLayout={this._containerOnLayout}>
+      <ScrollView style={[styles.fullWidth, style]} onLayout={this._containerOnLayout} scrollEnabled={this.state.scrollable} showsVerticalScrollIndicator={false}>
+        {headerComponent()}
         <View style={[{paddingTop, paddingBottom, paddingLeft, paddingRight}, this.state.contentStyle, contentStyle]}>
           {this.positions && this.positions.length === allData.length &&
             this.state.data.map((item, index) => {
@@ -395,7 +427,7 @@ export default class SortableGridview extends Component {
               const content = this.props.renderItem(item, index);
               const customTap = content.props.onTap ? content.props.onTap : () => {};
               const key = content.props.uniqueKey || index;
-              
+
               if (!this[`moveAnimate${key}`] || this.moveAnimate) {
                 this[`moveAnimate${key}`] = new Animated.ValueXY(this.positions[index]);
                 this.animateArray[index] = this[`moveAnimate${key}`]
@@ -415,31 +447,37 @@ export default class SortableGridview extends Component {
                   ]}
                 >
                   <TouchableWithoutFeedback style={styles.flex}
-                    // delayLongPress={200}
+                    // delayLongPress={1000}
                     onLongPress={this._onLongPressItems(key, index)}
                     onPress={() => {
                       customTap(item, index);
                     }}
+                    onPressOut={() => {
+                      if (!this.tempX && !this.tempY && this.currentAnchorKey) {
+                        Animated.timing(
+                          this[`selectAnimation${this.currentAnchorKey}`], // The value to drive
+                          this.state.customAnimation.endTimingOption,
+                        ).start()
+                      }
+                    }}
                   >
                     <View style={styles.fullScreen}>
                       {content}
+                      {this.props.renderItemCover && (
+                        <Animated.View
+                          key={`sortableViewItemCover${key}`}
+                          style={[
+                            styles.absolute,
+                            itemCoverStyle
+                          ]}
+                        >
+                          {this.props.renderItemCover(item, index)}
+                        </Animated.View>
+                      )}
                     </View>
                   </TouchableWithoutFeedback>
                 </Animated.View>,
-                this.props.renderItemCover && (
-                  <Animated.View
-                    key={`sortableViewItemCover${key}`}
-                    style={[
-                      styles.absolute,
-                      itemCoverStyle,
-                      {elevation: this.state.selectIndex === index ? 10 : 1, zIndex: this.state.selectIndex === index ? 10 : 1, ...this._getAnimation(key)},
-                      // {left: this[`moveAnimate${key}`].x, top: this[`moveAnimate${key}`].y}
-                      this[`moveAnimate${key}`].getLayout(),
-                    ]}
-                  >
-                    {this.props.renderItemCover(item, index)}
-                  </Animated.View>
-                ),
+
               ]
             })
           }
@@ -490,8 +528,9 @@ export default class SortableGridview extends Component {
             })
           }
         </View>
-        
-      </View>
+        {footerComponent()}
+
+      </ScrollView>
     )
   }
 }
@@ -499,6 +538,10 @@ export default class SortableGridview extends Component {
 const styles = StyleSheet.create({
   fullWidth: {
     width: '100%',
+    overflow: 'hidden',
+    // overflow: 'scroll',
+    // backgroundColor: 'red',
+    // height: 300,
   },
   absolute: {
     position: 'absolute',
